@@ -1,0 +1,61 @@
+stages:
+  - test
+  - build
+  - dockerize
+  - notify
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_HOST: "tcp://docker:2375"  
+
+services:
+  - docker:dind
+
+test:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - dotnet restore  
+    - dotnet test --configuration Release        
+  tags: 
+    - docker       
+
+build:
+  stage: build
+  image: radmgrp/sdk:8.0 # mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    # - apt-get update
+    # - apt-get install -y clang zlib1g-dev
+    -  dotnet publish --configuration Release --property:PublishDir=app/publish
+  artifacts:
+    paths:
+      - src/WeatherApi/app/publish/  
+  tags: 
+    - docker
+
+dockerize:
+  stage: dockerize
+  image: 
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  dependencies: 
+    - build   
+  script:
+    - cat $KANIKO_CONFIG > /kaniko/.docker/config.json
+    - >-
+      /kaniko/executor 
+      --context $CI_PROJECT_DIR 
+      --dockerfile $CI_PROJECT_DIR/Dockerfile 
+      --destination $DOCKERHUB_USERNAME/dotnet:latest
+  tags: 
+    - docker
+
+notify:
+  stage: notify
+  image: curlimages/curl:latest
+  script:
+    - |
+      curl -X POST -H 'Content-type: application/json' --data '{"text":"Build and deployment completed successfully."}' $SLACK_WEBHOOK_URL
+  tags: 
+  - docker     
